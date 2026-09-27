@@ -100,6 +100,16 @@ this width, starting at this zoom") that a map library reads and renders *live*,
 actual map data from UGRC's servers over the network. You need something that understands that
 format to see anything.
 
+**This file isn't locked to one renderer.** Esri's VectorTileServer (and so every style this repo
+generates or the editor exports) implements the Mapbox GL Style Specification version 8, unmodified
+— nothing in this repo's build or in the browser editor converts between a "Mapbox" and a
+"MapLibre" version of a style; for the paint/layout properties these styles actually use, there's
+no such conversion to make, since MapLibre GL JS is a spec-compatible fork of Mapbox GL JS from
+before Mapbox's license change. So the same downloaded file works, unmodified, with MapLibre GL JS
+(what the instructions below use), Mapbox GL JS, or Esri's own ArcGIS JS API — the one fixup below
+is a source-URL shape Esri's own tools resolve automatically that *any* generic GL renderer (either
+one) needs spelled out, not something specific to MapLibre.
+
 **Fastest way to just look at it:** drop the file into
 [Maputnik](https://maplibre.org/maputnik/), a free browser-based style editor — no install, no
 code. If it complains about the tile source, that's the one UGRC-specific gotcha below; fix that
@@ -111,9 +121,10 @@ one small fixup first:
 
 > **The one gotcha:** the downloaded style's vector source is shaped the way Esri's ArcGIS
 > `VectorTileServer` publishes it (`"url": "https://tiles.arcgis.com/.../VectorTileServer/"`) —
-> Esri's own tools resolve that automatically, but MapLibre GL JS doesn't, and will fail with
-> `Failed to parse URL from tile/...`. Rewrite it into the `tiles` array MapLibre expects before
-> handing the style to `maplibregl.Map`:
+> Esri's own tools resolve that automatically, but a generic GL renderer doesn't: MapLibre GL JS
+> fails with `Failed to parse URL from tile/...`, and Mapbox GL JS fails the same way for the same
+> reason. Rewrite it into the `tiles` array the GL spec expects before handing the style to
+> `maplibregl.Map` (or `mapboxgl.Map`):
 >
 > ```js
 > for (const [id, src] of Object.entries(style.sources)) {
