@@ -444,8 +444,10 @@
     opacity: .55; text-decoration: none; transition: opacity .1s ease, color .15s ease, background-color .15s ease;
   }
   .prop-spec-link svg { width: 13px; height: 13px; }
-  .prop-spec-link:hover { opacity: 1; color: hsl(var(--ring)); background: hsl(var(--muted)); }
-  .prop-spec-link:focus-visible { outline: none; opacity: 1; box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25); }
+  /* --primary (this app's actual yellow accent), not --ring - --ring is reserved for focus rings
+     (kept below, on :focus-visible) and would read as an unrelated blue accent here. */
+  .prop-spec-link:hover { opacity: 1; color: hsl(var(--primary)); background: hsl(var(--primary) / 0.15); }
+  .prop-spec-link:focus-visible { outline: none; opacity: 1; color: hsl(var(--primary)); box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25); }
   .prop-row-remove-slot { display: contents; } /* placeholder only - never actually renders */
   .prop-row-remove {
     display: flex; align-items: center; justify-content: center;
