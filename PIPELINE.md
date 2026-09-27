@@ -11,10 +11,9 @@ Status: `[ ]` not started · `[x]` done.
 
 - [x] **Undo/redo (Ctrl+Z / Ctrl+Y).** Done — a bounded history stack (`recordHistory()`/`undo()`/
   `redo()`), gesture-coalesced so a dragged slider is one undo step, wired to header buttons.
-- [ ] **Eyedropper color sampling.** Add a "pick from map" button to the color popover
-  (`docs/assets/colorpicker.js`) using the browser `EyeDropper` API, so a color edit can sample
-  an exact pixel off the rendered map instead of typing a hex value. Feature-detect and hide the
-  button where `window.EyeDropper` is unsupported.
+- ~~**Eyedropper color sampling.**~~ Already exists — `docs/assets/colorpicker.js` (~line 148)
+  already has a screen-wide eyedropper button, feature-detected on `window.EyeDropper`. Struck
+  from the backlog; this was a research miss when the list was first drafted, not new work done.
 - [x] **Keyboard shortcut sheet.** Done — `?`/header button opens a dialog listing Ctrl+Z/Y, `/`,
   Esc, `?`, with per-platform Ctrl/⌘ labeling; guarded so it doesn't hijack native text-field editing.
 
