@@ -928,6 +928,21 @@
     letter-spacing: .04em; color: hsl(var(--muted-foreground));
   }
   .modal-theme-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 22px; }
+  .shortcuts-modal { max-width: 380px; }
+  .shortcuts-list { margin: 16px 0 0; }
+  .shortcuts-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 7px 0; border-bottom: 1px solid hsl(var(--border));
+  }
+  .shortcuts-row:last-child { border-bottom: none; }
+  .shortcuts-row dt { display: flex; gap: 4px; flex: none; }
+  .shortcuts-row dd { margin: 0; font-size: 13px; color: hsl(var(--muted-foreground)); text-align: right; }
+  .shortcuts-row kbd {
+    display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
+    padding: 0 5px; border-radius: calc(var(--radius) - 4px); border: 1px solid hsl(var(--border));
+    background: hsl(var(--muted)); color: hsl(var(--foreground));
+    font-family: inherit; font-size: 11px; font-weight: 600;
+  }
   /* Flip card: front face is a live, non-interactive MapLibre preview (centered on the same Salt
      Lake City CENTER/ZOOM the editor itself opens on) so a theme's actual look is what sells it,
      not a paragraph; hovering/focusing flips to a back face with the label + description. Built
@@ -1019,6 +1034,20 @@
     </div>
   </div>
 
+  <div id="shortcuts-modal-overlay" class="modal-overlay" hidden>
+    <div class="modal shortcuts-modal" role="dialog" aria-modal="true" aria-labelledby="shortcuts-modal-title">
+      <div class="modal-head">
+        <h2 class="modal-title" id="shortcuts-modal-title">Keyboard shortcuts</h2>
+        <button id="shortcuts-modal-close" class="icon-btn" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+          </svg>
+        </button>
+      </div>
+      <dl class="shortcuts-list" id="shortcuts-list"></dl>
+    </div>
+  </div>
+
   <header>
     <div class="header-region header-start">
       <div class="brand"><span class="brand-dot" aria-hidden="true"></span><h1>UGRC Vector Map Tile Styles</h1></div>
@@ -1084,6 +1113,11 @@
       </div>
 
       <div class="divider" aria-hidden="true"></div>
+      <button id="shortcuts-btn" class="icon-btn" type="button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.001"/><path d="M10 8h.001"/><path d="M14 8h.001"/><path d="M18 8h.001"/><path d="M8 12h.001"/><path d="M12 12h.001"/><path d="M16 12h.001"/><path d="M7 16h10"/>
+        </svg>
+      </button>
       <a class="icon-btn" href="https://github.com/ar-puuk/ugrc-styles" target="_blank" rel="noopener" title="View source on GitHub" aria-label="View source on GitHub">
         <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
           <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/>
@@ -1892,6 +1926,14 @@ async function main() {
   const changedBadgeEl = document.getElementById("changed-badge");
   const undoBtn = document.getElementById("undo-btn");
   const redoBtn = document.getElementById("redo-btn");
+  const shortcutsBtn = document.getElementById("shortcuts-btn");
+  const shortcutsOverlay = document.getElementById("shortcuts-modal-overlay");
+  const shortcutsCloseBtn = document.getElementById("shortcuts-modal-close");
+  // Reported modifier matches what the keydown handler below actually checks (ctrlKey || metaKey) -
+  // labeled per-platform since Mac users think in terms of Cmd, not Ctrl.
+  const MOD_KEY = /Mac|iPod|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
+  undoBtn.title = `Undo (${MOD_KEY}+Z)`;
+  redoBtn.title = `Redo (${MOD_KEY}+Y)`;
   const downloadPick = new Dropdown(document.getElementById("download-dd"));
   const comparePick = new Dropdown(document.getElementById("compare-dd"));
   const compareMapEl = document.getElementById("compare-map");
@@ -2216,8 +2258,14 @@ async function main() {
     inspectPanelEl.hidden = true;
   }
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && inspectMode) setInspectMode(false);
-    if (isTypingTarget(e.target)) return; // don't steal Ctrl+Z/Y from a focused text field's own undo
+    if (e.key === "Escape") {
+      if (!shortcutsOverlay.hidden) { closeShortcuts(); return; }
+      if (inspectMode) setInspectMode(false);
+      return;
+    }
+    if (isTypingTarget(e.target)) return; // don't steal these from a focused text field's own handling
+    if (e.key === "?") { e.preventDefault(); toggleShortcuts(); return; }
+    if (e.key === "/") { e.preventDefault(); layerSearchEl.focus(); return; }
     const meta = e.ctrlKey || e.metaKey;
     if (!meta || e.altKey) return;
     const key = e.key.toLowerCase();
@@ -2227,13 +2275,50 @@ async function main() {
 
   /** True for anything with its own meaningful native text-editing undo (a text/search/number
    * input, a textarea, contenteditable) - a range slider or a plain button/div (e.g. the zoom
-   * section's custom thumb) has none, so global Ctrl+Z/Y is left to act on those. */
+   * section's custom thumb) has none, so global Ctrl+Z/Y (and "/"/"?") are left to act on those. */
   function isTypingTarget(el) {
     if (!el) return false;
     if (el.tagName === "TEXTAREA" || el.isContentEditable) return true;
     if (el.tagName === "INPUT") return !["range", "checkbox", "radio", "button", "file"].includes(el.type);
     return false;
   }
+
+  /** One row per shortcut, built from <kbd> keycaps rather than hand-typed into the HTML so the
+   * Ctrl/⌘ labeling always matches MOD_KEY above (and what the keydown handler actually checks). */
+  function renderShortcutsList() {
+    const rows = [
+      { keys: [MOD_KEY, "Z"], desc: "Undo" },
+      { keys: [MOD_KEY, "Y"], desc: "Redo" },
+      { keys: ["/"], desc: "Focus the layer search box" },
+      { keys: ["Esc"], desc: "Exit inspect mode, or close this dialog" },
+      { keys: ["?"], desc: "Show this list" },
+    ];
+    const list = document.getElementById("shortcuts-list");
+    list.innerHTML = "";
+    for (const { keys, desc } of rows) {
+      const row = document.createElement("div");
+      row.className = "shortcuts-row";
+      const dt = document.createElement("dt");
+      keys.forEach((k, i) => {
+        const kbd = document.createElement("kbd");
+        kbd.textContent = k;
+        dt.appendChild(kbd);
+        if (i < keys.length - 1) dt.appendChild(document.createTextNode("+"));
+      });
+      const dd = document.createElement("dd");
+      dd.textContent = desc;
+      row.append(dt, dd);
+      list.appendChild(row);
+    }
+  }
+  renderShortcutsList();
+
+  function showShortcuts() { shortcutsOverlay.hidden = false; }
+  function closeShortcuts() { shortcutsOverlay.hidden = true; }
+  function toggleShortcuts() { if (shortcutsOverlay.hidden) showShortcuts(); else closeShortcuts(); }
+  shortcutsBtn.addEventListener("click", showShortcuts);
+  shortcutsCloseBtn.addEventListener("click", closeShortcuts);
+  shortcutsOverlay.addEventListener("click", (e) => { if (e.target === shortcutsOverlay) closeShortcuts(); });
 
   // Mutable editor state. `current.style` is the live, possibly-edited merged style (the same
   // object handed to the map); `pristineLayersById` is a deep-copy snapshot of how it looked right
