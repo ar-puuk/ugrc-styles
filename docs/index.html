@@ -258,6 +258,8 @@
   .icon-btn svg { width: 15px; height: 15px; }
   .icon-btn:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
   .icon-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px hsl(var(--ring) / 0.25); }
+  .icon-btn:disabled { opacity: .35; cursor: not-allowed; }
+  .icon-btn:disabled:hover { background: transparent; color: hsl(var(--muted-foreground)); }
 
   /* A 3-way pill (system/light/dark), not a 2-state toggle - "system" is a real, distinct choice
      (follow the OS setting), not just an implicit default you fall out of on first click. */
@@ -1047,6 +1049,17 @@
     </div>
 
     <div class="header-region header-end">
+      <button id="undo-btn" class="icon-btn" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+        </svg>
+      </button>
+      <button id="redo-btn" class="icon-btn" type="button" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/>
+        </svg>
+      </button>
+      <div class="divider" aria-hidden="true"></div>
       <span id="changed-badge" style="font-size:12px;color:hsl(var(--muted-foreground));"></span>
       <label class="header-inline-label" for="compare-dd-button">Compare against</label>
       <div class="dd" id="compare-dd">
@@ -1877,6 +1890,8 @@ async function main() {
   const layerSearchEl = document.getElementById("layer-search");
   const propBodyEl = document.getElementById("prop-body");
   const changedBadgeEl = document.getElementById("changed-badge");
+  const undoBtn = document.getElementById("undo-btn");
+  const redoBtn = document.getElementById("redo-btn");
   const downloadPick = new Dropdown(document.getElementById("download-dd"));
   const comparePick = new Dropdown(document.getElementById("compare-dd"));
   const compareMapEl = document.getElementById("compare-map");
@@ -2202,7 +2217,23 @@ async function main() {
   }
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && inspectMode) setInspectMode(false);
+    if (isTypingTarget(e.target)) return; // don't steal Ctrl+Z/Y from a focused text field's own undo
+    const meta = e.ctrlKey || e.metaKey;
+    if (!meta || e.altKey) return;
+    const key = e.key.toLowerCase();
+    if (key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if (key === "y" || (key === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
   });
+
+  /** True for anything with its own meaningful native text-editing undo (a text/search/number
+   * input, a textarea, contenteditable) - a range slider or a plain button/div (e.g. the zoom
+   * section's custom thumb) has none, so global Ctrl+Z/Y is left to act on those. */
+  function isTypingTarget(el) {
+    if (!el) return false;
+    if (el.tagName === "TEXTAREA" || el.isContentEditable) return true;
+    if (el.tagName === "INPUT") return !["range", "checkbox", "radio", "button", "file"].includes(el.type);
+    return false;
+  }
 
   // Mutable editor state. `current.style` is the live, possibly-edited merged style (the same
   // object handed to the map); `pristineLayersById` is a deep-copy snapshot of how it looked right
@@ -2251,6 +2282,19 @@ async function main() {
   const compareStyleCache = new Map(); // template key -> render-ready style
   const themeThumbnails = new Map(); // template key -> captured PNG data: URL, built once per session
   let draftSaveTimer = null;
+  // Undo/redo: snapshots of current.style.layers + orderChanged, historyIndex always pointing at
+  // the entry matching the live state (so history[historyIndex] === what's on screen right now).
+  // A short quiet-period timer coalesces a whole gesture - e.g. every "input" tick of a dragged
+  // slider (see renderRangeRow/renderZoomSection) - into one undo step: as long as recordHistory()
+  // keeps getting called within HISTORY_GESTURE_MS of the last call, it replaces the current tip
+  // instead of pushing a new one, so undo steps back to the state before the whole drag, not one
+  // tick of it. Reset whenever a genuinely new style is loaded (loadBuild()) - undoing across two
+  // different templates/uploads has no sensible meaning.
+  let history = [];
+  let historyIndex = -1;
+  let historyGestureTimer = null;
+  const HISTORY_GESTURE_MS = 500;
+  const MAX_HISTORY = 100;
 
   function setStatus(msg) {
     if (msg == null) { statusEl.hidden = true; return; }
@@ -2265,11 +2309,79 @@ async function main() {
     orderChanged = false;
   }
 
+  function updateUndoRedoButtons() {
+    undoBtn.disabled = historyIndex <= 0;
+    redoBtn.disabled = historyIndex >= history.length - 1;
+  }
+
+  /** Called once right after a fresh style is loaded (loadBuild()) - starts a new undo timeline at
+   * that as-loaded state, discarding whatever a previously-loaded template/upload had. */
+  function resetHistory() {
+    history = current ? [{ layers: JSON.parse(JSON.stringify(current.style.layers)), orderChanged }] : [];
+    historyIndex = 0;
+    clearTimeout(historyGestureTimer);
+    historyGestureTimer = null;
+    updateUndoRedoButtons();
+  }
+
+  /** Call after any mutation to current.style.layers (property/filter/zoom/visibility edits,
+   * reorder, per-layer/global reset) - see this block's own comment above for the gesture-
+   * coalescing rationale. */
+  function recordHistory() {
+    if (!current) return;
+    const snap = { layers: JSON.parse(JSON.stringify(current.style.layers)), orderChanged };
+    if (historyGestureTimer) {
+      history[historyIndex] = snap; // still mid-gesture - replace the in-progress tip
+    } else {
+      history = history.slice(0, historyIndex + 1); // a fresh edit after undo drops the redo branch
+      history.push(snap);
+      historyIndex++;
+      if (history.length > MAX_HISTORY) { history.shift(); historyIndex--; }
+    }
+    clearTimeout(historyGestureTimer);
+    historyGestureTimer = setTimeout(() => { historyGestureTimer = null; }, HISTORY_GESTURE_MS);
+    updateUndoRedoButtons();
+  }
+
+  function restoreHistoryEntry(snap) {
+    current.style.layers = JSON.parse(JSON.stringify(snap.layers));
+    orderChanged = snap.orderChanged;
+    changedIds = new Set();
+    for (const ly of current.style.layers) {
+      const pristine = pristineLayersById && pristineLayersById.get(ly.id);
+      if (!pristine || JSON.stringify(ly) !== JSON.stringify(pristine)) changedIds.add(ly.id);
+    }
+    map.setStyle(prepareForRender(current.style));
+    renderLayerList();
+    renderPropertyPanel();
+    updateChangedBadge();
+    saveDraftNow(current);
+    updateUndoRedoButtons();
+  }
+
+  function undo() {
+    // Flush an in-progress gesture as its own step first, so undoing right after e.g. releasing a
+    // slider (before HISTORY_GESTURE_MS has elapsed) still steps back to before that whole drag,
+    // and so a later edit doesn't keep overwriting a now-stale history entry (see recordHistory()).
+    if (historyGestureTimer) { clearTimeout(historyGestureTimer); historyGestureTimer = null; }
+    if (!current || historyIndex <= 0) return;
+    historyIndex--;
+    restoreHistoryEntry(history[historyIndex]);
+  }
+
+  function redo() {
+    if (historyGestureTimer) { clearTimeout(historyGestureTimer); historyGestureTimer = null; }
+    if (!current || historyIndex >= history.length - 1) return;
+    historyIndex++;
+    restoreHistoryEntry(history[historyIndex]);
+  }
+
   function markLayerChecked(layer) {
     const pristine = pristineLayersById && pristineLayersById.get(layer.id);
     const changed = !pristine || JSON.stringify(layer) !== JSON.stringify(pristine);
     if (changed) changedIds.add(layer.id); else changedIds.delete(layer.id);
     updateChangedBadge();
+    recordHistory();
     // Debounced: a dragged slider fires many edits per second, but the draft only needs to be
     // roughly current, not updated on every single one of them.
     clearTimeout(draftSaveTimer);
@@ -2575,6 +2687,7 @@ async function main() {
     renderLayerList();
     renderPropertyPanel();
     updateChangedBadge();
+    recordHistory();
     saveDraftNow(current);
   }
 
@@ -3321,6 +3434,7 @@ async function main() {
     changedIds.delete(id);
     map.setStyle(prepareForRender(current.style));
     renderLayerList(); renderPropertyPanel(); updateChangedBadge();
+    recordHistory();
     saveDraftNow(current);
   }
 
@@ -3331,12 +3445,14 @@ async function main() {
     orderChanged = false;
     map.setStyle(prepareForRender(current.style));
     renderLayerList(); renderPropertyPanel(); updateChangedBadge();
+    recordHistory();
     saveDraftNow(current);
   }
 
   async function loadBuild(built, label) {
     current = { style: built.style, serviceOriginals: built.serviceOriginals, label };
     snapshotPristine();
+    resetHistory();
     selectedLayerId = null;
     openGroups = new Set();
     map.setStyle(prepareForRender(current.style));
@@ -3722,6 +3838,8 @@ async function main() {
     e.target.value = "";
   });
   document.getElementById("reset-all-btn").addEventListener("click", resetAll);
+  undoBtn.addEventListener("click", undo);
+  redoBtn.addEventListener("click", redo);
   downloadPick.addEventListener("change", () => {
     const picked = downloadPick.value;
     downloadPick.clearSelection("Download"); // a fired action, not a persisted choice - see refreshDownloadOptions()
