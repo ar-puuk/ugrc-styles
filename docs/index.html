@@ -951,6 +951,9 @@
   .shortcuts-row:last-child { border-bottom: none; }
   .shortcuts-row dt { display: flex; gap: 4px; flex: none; }
   .shortcuts-row dd { margin: 0; font-size: 13px; color: hsl(var(--muted-foreground)); text-align: right; }
+  .style-info-modal { max-width: 420px; }
+  .style-info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 12px; }
+  #style-info-use-view { margin-top: 4px; }
   .shortcuts-row kbd {
     display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px;
     padding: 0 5px; border-radius: calc(var(--radius) - 4px); border: 1px solid hsl(var(--border));
@@ -1062,6 +1065,50 @@
     </div>
   </div>
 
+  <div id="style-info-modal-overlay" class="modal-overlay" hidden>
+    <div class="modal style-info-modal" role="dialog" aria-modal="true" aria-labelledby="style-info-modal-title">
+      <div class="modal-head">
+        <h2 class="modal-title" id="style-info-modal-title">Style info</h2>
+        <button id="style-info-modal-close" class="icon-btn" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+          </svg>
+        </button>
+      </div>
+      <p class="modal-intro">
+        The style's own root fields, saved into whatever you download — most viewers use these as
+        the initial view when nothing else specifies one. Leave a field blank to omit it.
+      </p>
+      <div class="prop-row">
+        <label for="style-info-name">Name</label>
+        <input id="style-info-name" type="text" class="prop-text-input" placeholder="e.g. My Utah map">
+      </div>
+      <div class="style-info-grid">
+        <div class="prop-row">
+          <label for="style-info-lng">Longitude</label>
+          <input id="style-info-lng" type="number" step="any" class="prop-text-input" placeholder="-111.891">
+        </div>
+        <div class="prop-row">
+          <label for="style-info-lat">Latitude</label>
+          <input id="style-info-lat" type="number" step="any" class="prop-text-input" placeholder="40.761">
+        </div>
+        <div class="prop-row">
+          <label for="style-info-zoom">Zoom</label>
+          <input id="style-info-zoom" type="number" step="0.1" min="0" max="24" class="prop-text-input">
+        </div>
+        <div class="prop-row">
+          <label for="style-info-bearing">Bearing</label>
+          <input id="style-info-bearing" type="number" step="1" class="prop-text-input">
+        </div>
+        <div class="prop-row">
+          <label for="style-info-pitch">Pitch</label>
+          <input id="style-info-pitch" type="number" step="1" min="0" max="85" class="prop-text-input">
+        </div>
+      </div>
+      <button id="style-info-use-view" type="button" class="btn btn-sm">Use current map view</button>
+    </div>
+  </div>
+
   <header>
     <div class="header-region header-start">
       <div class="brand"><span class="brand-dot" aria-hidden="true"></span><h1>UGRC Vector Map Tile Styles</h1></div>
@@ -1089,6 +1136,12 @@
         Upload style…
       </button>
       <input id="upload-input" type="file" accept=".json,application/json" hidden>
+      <button id="style-info-btn" class="icon-btn" type="button" title="Style info (name, center, zoom, bearing, pitch)" aria-label="Style info" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/>
+          <path d="M15 5.764v15"/><path d="M9 3.236v15"/>
+        </svg>
+      </button>
     </div>
 
     <div class="header-region header-end">
@@ -2000,6 +2053,16 @@ async function main() {
   const shortcutsBtn = document.getElementById("shortcuts-btn");
   const shortcutsOverlay = document.getElementById("shortcuts-modal-overlay");
   const shortcutsCloseBtn = document.getElementById("shortcuts-modal-close");
+  const styleInfoBtn = document.getElementById("style-info-btn");
+  const styleInfoOverlay = document.getElementById("style-info-modal-overlay");
+  const styleInfoCloseBtn = document.getElementById("style-info-modal-close");
+  const styleInfoNameEl = document.getElementById("style-info-name");
+  const styleInfoLngEl = document.getElementById("style-info-lng");
+  const styleInfoLatEl = document.getElementById("style-info-lat");
+  const styleInfoZoomEl = document.getElementById("style-info-zoom");
+  const styleInfoBearingEl = document.getElementById("style-info-bearing");
+  const styleInfoPitchEl = document.getElementById("style-info-pitch");
+  const styleInfoUseViewBtn = document.getElementById("style-info-use-view");
   // Reported modifier matches what the keydown handler below actually checks (ctrlKey || metaKey) -
   // labeled per-platform since Mac users think in terms of Cmd, not Ctrl.
   const MOD_KEY = /Mac|iPod|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
@@ -2331,6 +2394,7 @@ async function main() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       if (!shortcutsOverlay.hidden) { closeShortcuts(); return; }
+      if (!styleInfoOverlay.hidden) { closeStyleInfo(); return; }
       if (inspectMode) setInspectMode(false);
       return;
     }
@@ -2390,6 +2454,105 @@ async function main() {
   shortcutsBtn.addEventListener("click", showShortcuts);
   shortcutsCloseBtn.addEventListener("click", closeShortcuts);
   shortcutsOverlay.addEventListener("click", (e) => { if (e.target === shortcutsOverlay) closeShortcuts(); });
+
+  /** The style's own root fields (name/center/zoom/bearing/pitch) - optional per the GL spec, used
+   * by a conforming viewer as its initial view when nothing else specifies one. This editor's own
+   * map always opens at the fixed CENTER/ZOOM above regardless of what's in the style (so editing
+   * these here doesn't relocate the *editor* - see applyStyleInfoToMap() below for why it still
+   * jumps the live map anyway: feedback that what you typed is right, not a requirement). Not part
+   * of undo/redo (which only tracks layers/order, see the history block above) or the "N layers
+   * changed" badge - a deliberate scope line, not an oversight; "Reset all" still discards these
+   * too, since it reloads the whole style fresh from the template rather than special-casing them. */
+  function openStyleInfo() {
+    if (!current) return;
+    styleInfoNameEl.value = current.style.name ?? "";
+    const center = Array.isArray(current.style.center) ? current.style.center : [];
+    styleInfoLngEl.value = center[0] ?? "";
+    styleInfoLatEl.value = center[1] ?? "";
+    styleInfoZoomEl.value = current.style.zoom ?? "";
+    styleInfoBearingEl.value = current.style.bearing ?? "";
+    styleInfoPitchEl.value = current.style.pitch ?? "";
+    styleInfoOverlay.hidden = false;
+  }
+  function closeStyleInfo() { styleInfoOverlay.hidden = true; }
+
+  // Moves the live map to whatever of center/zoom/bearing/pitch the style now has - immediate
+  // feedback that a typed value is right (or a typo), not just trusted blind. Only ever reads
+  // current.style, never writes it - callers set the style field(s) first.
+  function applyStyleInfoToMap() {
+    if (!current) return;
+    const opts = {};
+    if (Array.isArray(current.style.center)) opts.center = current.style.center;
+    if (typeof current.style.zoom === "number") opts.zoom = current.style.zoom;
+    if (typeof current.style.bearing === "number") opts.bearing = current.style.bearing;
+    if (typeof current.style.pitch === "number") opts.pitch = current.style.pitch;
+    if (Object.keys(opts).length > 0) map.jumpTo(opts);
+  }
+
+  function commitStyleInfoName() {
+    if (!current) return;
+    const v = styleInfoNameEl.value.trim();
+    if (v === "") delete current.style.name; else current.style.name = v;
+    saveDraftNow(current);
+  }
+
+  // Both fields commit together (a style.center is one [lng, lat] pair, not two independent
+  // fields) - only actually applies once both are empty (delete) or both parse as numbers (set);
+  // a partial/invalid combination is left alone rather than guessing or erroring in this small a
+  // dialog.
+  function commitStyleInfoCenter() {
+    if (!current) return;
+    const lngRaw = styleInfoLngEl.value.trim();
+    const latRaw = styleInfoLatEl.value.trim();
+    if (lngRaw === "" && latRaw === "") {
+      delete current.style.center;
+    } else {
+      if (lngRaw === "" || latRaw === "") return;
+      const lng = Number(lngRaw), lat = Number(latRaw);
+      if (Number.isNaN(lng) || Number.isNaN(lat)) return;
+      current.style.center = [lng, lat];
+    }
+    saveDraftNow(current);
+    applyStyleInfoToMap();
+  }
+
+  function commitStyleInfoNumberField(key, el) {
+    if (!current) return;
+    const raw = el.value.trim();
+    if (raw === "") {
+      delete current.style[key];
+    } else {
+      const n = Number(raw);
+      if (Number.isNaN(n)) return;
+      current.style[key] = n;
+    }
+    saveDraftNow(current);
+    applyStyleInfoToMap();
+  }
+
+  styleInfoBtn.addEventListener("click", openStyleInfo);
+  styleInfoCloseBtn.addEventListener("click", closeStyleInfo);
+  styleInfoOverlay.addEventListener("click", (e) => { if (e.target === styleInfoOverlay) closeStyleInfo(); });
+  styleInfoNameEl.addEventListener("change", commitStyleInfoName);
+  styleInfoLngEl.addEventListener("change", commitStyleInfoCenter);
+  styleInfoLatEl.addEventListener("change", commitStyleInfoCenter);
+  styleInfoZoomEl.addEventListener("change", () => commitStyleInfoNumberField("zoom", styleInfoZoomEl));
+  styleInfoBearingEl.addEventListener("change", () => commitStyleInfoNumberField("bearing", styleInfoBearingEl));
+  styleInfoPitchEl.addEventListener("change", () => commitStyleInfoNumberField("pitch", styleInfoPitchEl));
+  styleInfoUseViewBtn.addEventListener("click", () => {
+    if (!current) return;
+    const c = map.getCenter();
+    current.style.center = [Number(c.lng.toFixed(6)), Number(c.lat.toFixed(6))];
+    current.style.zoom = Number(map.getZoom().toFixed(2));
+    current.style.bearing = Number(map.getBearing().toFixed(1));
+    current.style.pitch = Number(map.getPitch().toFixed(1));
+    styleInfoLngEl.value = current.style.center[0];
+    styleInfoLatEl.value = current.style.center[1];
+    styleInfoZoomEl.value = current.style.zoom;
+    styleInfoBearingEl.value = current.style.bearing;
+    styleInfoPitchEl.value = current.style.pitch;
+    saveDraftNow(current);
+  });
 
   // Mutable editor state. `current.style` is the live, possibly-edited merged style (the same
   // object handed to the map); `pristineLayersById` is a deep-copy snapshot of how it looked right
@@ -3713,7 +3876,14 @@ async function main() {
   function downloadThree() {
     if (!current || !current.serviceOriginals) return;
     const split = splitMergedStyle(current.style.layers, current.serviceOriginals);
+    // splitMergedStyle() itself only rebuilds {version, sprite, glyphs, sources, layers} per
+    // service (STYLE_EDITOR_PLAN.md's own shape for these) - carry the merged style's own root
+    // fields (Style info, above) onto each split-out file too, so they aren't silently dropped
+    // for whichever download option a visitor happens to pick.
     for (const [service, style] of Object.entries(split)) {
+      for (const key of ["name", "center", "zoom", "bearing", "pitch"]) {
+        if (current.style[key] !== undefined) style[key] = current.style[key];
+      }
       downloadJson(`UGRC_${service}_${slugify(current.label)}-edited.json`, style);
     }
   }
@@ -3740,6 +3910,7 @@ async function main() {
     downloadPick.setOptions(opts);
     downloadPick.clearSelection("Download");
     downloadPick.button.disabled = !current;
+    styleInfoBtn.disabled = !current;
   }
 
   const NONE_KEY = "none";
