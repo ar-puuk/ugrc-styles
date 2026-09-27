@@ -55,11 +55,11 @@ narrower scope (3 fixed Esri services, no arbitrary source editing, no accounts)
   wired into both raw-JSON textareas' existing blur handlers. Unit-tested against the real
   `PROPERTY_SPECS` data (13 cases) plus a real-data browser pass (a genuine complex filter and a
   `text-font` array from the Shadow theme).
-- [ ] **Style metadata quick-edit (name / center / zoom / bearing / pitch).** Maputnik has a
-  small "style info" panel for the root style object's own fields. Ours never exposes
-  `style.center`/`zoom`/`bearing`/`pitch` — useful mainly so a downloaded style opens centered on
-  Utah (or wherever the user cares about) instead of whatever the template happened to load with.
-  Small, self-contained addition.
+- [x] **Style metadata quick-edit (name / center / zoom / bearing / pitch).** Done — a "Style info"
+  header button/dialog edits the style's own root fields (blank deletes the key), a "Use current
+  map view" button captures the live camera, editing also jumps the live map for feedback, and both
+  download paths (combined + the 3 split files) carry the fields through. Not wired into undo/redo
+  or the "changed" badge — a deliberate style-level/layer-level scope line.
 - [ ] **Reconsider: visual expression editor (ƒx toggle) for `interpolate`/`match`/`step`.**
   This is Maputnik's single biggest UX advantage over us — a real form (stops as add/remove rows,
   a mini chart for `interpolate`) instead of a raw-JSON textarea for data-driven properties. It's
