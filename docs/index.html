@@ -1353,6 +1353,63 @@ const PROPERTY_SPECS = {
   "line-pattern": { kind: "string" },
 };
 
+/** Validates a raw-JSON property row's parsed value against what we actually know from
+ * PROPERTY_SPECS above, without pulling in a full expression-grammar validator (see
+ * PIPELINE.md's "Inline schema validation" entry for why - the upstream MapLibre validator
+ * targets a newer/broader spec than the v8/Esri flavor these styles implement and would
+ * false-flag valid Esri-emitted constructs). Deliberately shallow and type-only:
+ * - An array is checked only for "does this look like an expression at all" (starts with an
+ *   operator name string) - never which operator, or its arguments' types, since that's the
+ *   part a real grammar validator would need and we're explicitly not building one.
+ * - An object is checked only for having a "stops" array (the one thing every legacy GL
+ *   "function" value - plain or property function - requires per spec).
+ * - A plain scalar is checked against PROPERTY_SPECS' own `kind` for that property, but only on
+ *   JS type (string/number/boolean) or enum *membership* - both real, fixed spec-level facts -
+ *   never against a range's min/max, since PROPERTY_SPECS' own ranges are this editor's slider
+ *   bounds (the highest value actually seen in these two themes), not a spec limit; a value
+ *   outside them is unusual, not necessarily wrong.
+ * Returns an error message string, or null if nothing looks wrong. A property with no
+ * PROPERTY_SPECS entry at all only gets the array/object shape checks - there's no known type to
+ * check its scalar values against without risking exactly the false-positive this is trying to
+ * avoid. */
+function validateRawPropertyValue(prop, value) {
+  if (Array.isArray(value)) {
+    if (value.length === 0 || typeof value[0] !== "string") {
+      return `Doesn't look like a GL expression - one should start with an operator name string, e.g. ["interpolate", ...] or ["get", "field"].`;
+    }
+    return null;
+  }
+  if (value !== null && typeof value === "object") {
+    if (!Array.isArray(value.stops)) {
+      return `Doesn't look like a style function - expected a "stops" array, e.g. {"stops":[[0,1],[10,5]]}.`;
+    }
+    return null;
+  }
+  const spec = PROPERTY_SPECS[prop];
+  if (!spec) return null;
+  if (spec.kind === "color" && typeof value !== "string") return `"${prop}" expects a color string, got ${typeof value}.`;
+  if (spec.kind === "range" && (typeof value !== "number" || Number.isNaN(value))) return `"${prop}" expects a number, got ${typeof value}.`;
+  if (spec.kind === "enum" && (typeof value !== "string" || !spec.values.includes(value))) {
+    return `"${prop}" must be one of ${spec.values.join(", ")} - got ${JSON.stringify(value)}.`;
+  }
+  if (spec.kind === "boolean" && typeof value !== "boolean") return `"${prop}" expects true/false, got ${typeof value}.`;
+  if (spec.kind === "string" && typeof value !== "string") return `"${prop}" expects a string, got ${typeof value}.`;
+  return null;
+}
+
+// The GL spec's filter operators haven't changed since v8 and there are few of them, unlike
+// expressions - safe to check membership exactly rather than just "starts with some string" (see
+// validateRawPropertyValue's own comment on why expressions don't get this same treatment).
+const FILTER_OPERATORS = new Set(["==", "!=", "<", "<=", ">", ">=", "in", "!in", "all", "any", "none", "has", "!has", "within"]);
+
+function validateRawFilterValue(value) {
+  if (!Array.isArray(value)) return "A filter must be an array.";
+  if (value.length === 0 || typeof value[0] !== "string" || !FILTER_OPERATORS.has(value[0])) {
+    return `A filter should start with an operator like "==", "all", "any", etc. - got ${JSON.stringify(value[0] ?? null)}.`;
+  }
+  return null;
+}
+
 /** Every property this editor knows the ArcGIS/Mapbox GL style spec allows for a given layer
  * type, used by the "Add property" control (STYLE_EDITOR_PLAN.md's originally-planned "add
  * property affordance scoped to that layer's type") - independent of PROPERTY_SPECS above,
@@ -3053,6 +3110,8 @@ async function main() {
       let value;
       try { value = JSON.parse(textarea.value); }
       catch { err.textContent = "Invalid JSON - not applied."; err.hidden = false; return; }
+      const problem = validateRawPropertyValue(prop, value);
+      if (problem) { err.textContent = problem + " Not applied."; err.hidden = false; return; }
       err.hidden = true;
       applyPropertyEdit(layer, kind, prop, value);
       refreshRawJson(layer);
@@ -3292,7 +3351,8 @@ async function main() {
         let value;
         try { value = JSON.parse(textarea.value); }
         catch { err.textContent = "Invalid JSON - not applied."; err.hidden = false; return; }
-        if (!Array.isArray(value)) { err.textContent = "A filter must be an array."; err.hidden = false; return; }
+        const problem = validateRawFilterValue(value);
+        if (problem) { err.textContent = problem + " Not applied."; err.hidden = false; return; }
         err.hidden = true;
         layer.filter = value;
         map.setFilter(layer.id, value);
