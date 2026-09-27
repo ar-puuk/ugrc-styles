@@ -71,13 +71,13 @@ narrower scope (3 fixed Esri services, no arbitrary source editing, no accounts)
   goal is one JSON that works across MapLibre/Mapbox/Esri, adding an expression editor would be the
   one feature capable of producing a file that renders fine in the first two and silently breaks in
   the third - a regression against that goal, not a neutral nice-to-have.
-- [ ] **Stops editor for the legacy zoom-only `{stops:[...]}` function.** The safe alternative to
-  the item above: this *is* real, already-used UGRC data (LiteLabels' `text-size`, 26 instances) and
-  *is* something Esri's own renderer already handles, since it's Esri's own output. A small add/
-  remove-row UI for `[zoom, value]` pairs - editing an existing raw-JSON `{stops:[...]}` fallback
-  row (see `validateRawPropertyValue()`'s object-shape check) instead of hand-typing the array.
-  Scope: zoom-only stops only, matching what's actually seen in this data - not property/categorical
-  stops (never seen here) and not a stepping stone toward the expression editor above.
+- [x] **Stops editor for the legacy zoom-only `{stops:[...]}` function.** Done —
+  `isZoomOnlyStopsFunction()` detects a bare `{stops:[[zoom,value],...]}` (no `base`, no
+  `property`) and routes it to `renderStopsRow()`'s add/remove-row editor instead of raw JSON;
+  anything else still falls back to raw so nothing's silently dropped. Value input type follows
+  `PROPERTY_SPECS`' own `kind`. Reuses `applyPropertyEdit()`, so undo/redo, the "changed" badge, and
+  sibling bulk-apply all work for free. Verified against real LiteLabels `text-size` data (add/
+  remove/re-sort-on-commit/undo) plus 8 unit-tested edge cases for the detector.
 - **Not planned — data-source management (add/edit/remove vector/raster/GeoJSON/image/video
   sources).** Maputnik supports this because it edits arbitrary styles; we deliberately don't —
   our styles' sources are always UGRC's 3 fixed Esri `VectorTileServer` endpoints (or, for an
