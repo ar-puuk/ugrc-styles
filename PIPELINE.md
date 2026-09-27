@@ -60,13 +60,24 @@ narrower scope (3 fixed Esri services, no arbitrary source editing, no accounts)
   map view" button captures the live camera, editing also jumps the live map for feedback, and both
   download paths (combined + the 3 split files) carry the fields through. Not wired into undo/redo
   or the "changed" badge — a deliberate style-level/layer-level scope line.
-- [ ] **Reconsider: visual expression editor (ƒx toggle) for `interpolate`/`match`/`step`.**
-  This is Maputnik's single biggest UX advantage over us — a real form (stops as add/remove rows,
-  a mini chart for `interpolate`) instead of a raw-JSON textarea for data-driven properties. It's
-  explicitly called out as a non-goal in `STYLE_EDITOR_PLAN.md` §12 for v1, and it's real effort
-  (a stop-editor UI plus per-expression-type parsing), so it's listed here rather than promoted
-  above — but it's the one Maputnik feature actually worth revisiting that scoping decision for,
-  since zoom-band road/label styling in these themes leans on `interpolate` a lot.
+- ~~**Visual expression editor (ƒx toggle) for `interpolate`/`match`/`step`.**~~ Not planned —
+  reversed from "reconsider" after checking both ends of the compatibility question (2026-09-26
+  discussion). Pulled UGRC's *live* Esri source directly: 0 occurrences of `interpolate`/`match`/
+  `step`/`case` across all 547 LiteBase+LiteLabels layers — ArcGIS Pro's vector-tile publisher
+  never emits them, only plain literals, many duplicate zoom-banded layers, or (26 times, LiteLabels
+  only) the legacy zoom-only `{stops:[...]}` function. Esri's own VectorTileLayer renderer doesn't
+  support these expressions either, and Esri has stated no plans to - reports include `interpolate`
+  silently not interpolating and a layer *disappearing entirely* once a `match` is added. Since the
+  goal is one JSON that works across MapLibre/Mapbox/Esri, adding an expression editor would be the
+  one feature capable of producing a file that renders fine in the first two and silently breaks in
+  the third - a regression against that goal, not a neutral nice-to-have.
+- [ ] **Stops editor for the legacy zoom-only `{stops:[...]}` function.** The safe alternative to
+  the item above: this *is* real, already-used UGRC data (LiteLabels' `text-size`, 26 instances) and
+  *is* something Esri's own renderer already handles, since it's Esri's own output. A small add/
+  remove-row UI for `[zoom, value]` pairs - editing an existing raw-JSON `{stops:[...]}` fallback
+  row (see `validateRawPropertyValue()`'s object-shape check) instead of hand-typing the array.
+  Scope: zoom-only stops only, matching what's actually seen in this data - not property/categorical
+  stops (never seen here) and not a stepping stone toward the expression editor above.
 - **Not planned — data-source management (add/edit/remove vector/raster/GeoJSON/image/video
   sources).** Maputnik supports this because it edits arbitrary styles; we deliberately don't —
   our styles' sources are always UGRC's 3 fixed Esri `VectorTileServer` endpoints (or, for an
@@ -78,5 +89,8 @@ narrower scope (3 fixed Esri services, no arbitrary source editing, no accounts)
   `docs/`, same as the editor plan.
 - Re-check against `STYLE_EDITOR_PLAN.md` §12 ("Known gaps / non-goals for v1") before expanding
   any of these — e.g. the diff-share idea above is deliberately *not* the full-style URL sharing
-  that section rules out, and the expression-editor idea explicitly revisits a documented
-  non-goal rather than silently overriding it.
+  that section rules out.
+- Cross-platform compatibility (MapLibre + Mapbox + Esri) is a hard requirement, not just a nice-
+  to-have — see the struck expression-editor item above for why that ruled it out specifically.
+  Check any future data-driven-styling idea against what Esri's VectorTileLayer actually renders,
+  not just what the spec technically allows.
