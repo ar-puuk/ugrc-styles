@@ -954,15 +954,19 @@
     letter-spacing: .04em; color: hsl(var(--muted-foreground));
   }
   .modal-theme-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 22px; }
-  .shortcuts-modal { max-width: 380px; }
+  .shortcuts-modal { max-width: 440px; }
   .shortcuts-list { margin: 16px 0 0; }
   .shortcuts-row {
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
     padding: 7px 0; border-bottom: 1px solid hsl(var(--border));
   }
   .shortcuts-row:last-child { border-bottom: none; }
-  .shortcuts-row dt { display: flex; gap: 4px; flex: none; }
+  /* wrap, not nowrap - a multi-combo row (redo's "Ctrl+Y or Ctrl+Shift+Z") can run long, especially
+     spelled out in words rather than Mac's single-glyph ⌘/⇧ - safer to wrap onto a second line
+     inside this cell than to force the row wider than the modal or crowd the description column. */
+  .shortcuts-row dt { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex: none; row-gap: 2px; }
   .shortcuts-row dd { margin: 0; font-size: 13px; color: hsl(var(--muted-foreground)); text-align: right; }
+  .shortcuts-or { font-size: 11px; color: hsl(var(--muted-foreground)); margin: 0 1px; }
   .style-info-modal { max-width: 420px; }
   .style-info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 12px; }
   #style-info-use-view { margin-top: 4px; }
@@ -2075,11 +2079,18 @@ async function main() {
   const styleInfoBearingEl = document.getElementById("style-info-bearing");
   const styleInfoPitchEl = document.getElementById("style-info-pitch");
   const styleInfoUseViewBtn = document.getElementById("style-info-use-view");
-  // Reported modifier matches what the keydown handler below actually checks (ctrlKey || metaKey) -
-  // labeled per-platform since Mac users think in terms of Cmd, not Ctrl.
-  const MOD_KEY = /Mac|iPod|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
+  // Reported modifiers match what the keydown handler below actually checks (ctrlKey || metaKey,
+  // and - for redo - a bare "y" or a shifted "z") - labeled per-platform since Mac users think in
+  // terms of Cmd/Shift glyphs, not the words "Ctrl"/"Shift". Redo has two real alternatives (see
+  // the handler): Y alone, matching this app's own choice of "the letter after undo's Z" and the
+  // common Windows/Linux convention; Shift+Z, macOS's own native redo shortcut (and a common
+  // secondary binding elsewhere) - both shown, on every platform, since the code accepts both
+  // regardless of platform rather than picking one over the other.
+  const IS_MAC = /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+  const MOD_KEY = IS_MAC ? "⌘" : "Ctrl";
+  const SHIFT_KEY = IS_MAC ? "⇧" : "Shift";
   undoBtn.title = `Undo (${MOD_KEY}+Z)`;
-  redoBtn.title = `Redo (${MOD_KEY}+Y)`;
+  redoBtn.title = `Redo (${MOD_KEY}+Y or ${MOD_KEY}+${SHIFT_KEY}+Z)`;
   const downloadPick = new Dropdown(document.getElementById("download-dd"));
   const comparePick = new Dropdown(document.getElementById("compare-dd"));
   const compareMapEl = document.getElementById("compare-map");
@@ -2432,25 +2443,36 @@ async function main() {
 
   /** One row per shortcut, built from <kbd> keycaps rather than hand-typed into the HTML so the
    * Ctrl/⌘ labeling always matches MOD_KEY above (and what the keydown handler actually checks). */
+  // Each row's `combos` is a list of alternative key combinations (rendered "combo1 or combo2") -
+  // redo is the only one with more than one today, since the keydown handler really does accept
+  // either. A single-combo row is just a list of one.
   function renderShortcutsList() {
     const rows = [
-      { keys: [MOD_KEY, "Z"], desc: "Undo" },
-      { keys: [MOD_KEY, "Y"], desc: "Redo" },
-      { keys: ["/"], desc: "Focus the layer search box" },
-      { keys: ["Esc"], desc: "Exit inspect mode, or close this dialog" },
-      { keys: ["?"], desc: "Show this list" },
+      { combos: [[MOD_KEY, "Z"]], desc: "Undo" },
+      { combos: [[MOD_KEY, "Y"], [MOD_KEY, SHIFT_KEY, "Z"]], desc: "Redo" },
+      { combos: [["/"]], desc: "Focus the layer search box" },
+      { combos: [["Esc"]], desc: "Exit inspect mode, or close this dialog" },
+      { combos: [["?"]], desc: "Show this list" },
     ];
     const list = document.getElementById("shortcuts-list");
     list.innerHTML = "";
-    for (const { keys, desc } of rows) {
+    for (const { combos, desc } of rows) {
       const row = document.createElement("div");
       row.className = "shortcuts-row";
       const dt = document.createElement("dt");
-      keys.forEach((k, i) => {
-        const kbd = document.createElement("kbd");
-        kbd.textContent = k;
-        dt.appendChild(kbd);
-        if (i < keys.length - 1) dt.appendChild(document.createTextNode("+"));
+      combos.forEach((combo, ci) => {
+        combo.forEach((k, i) => {
+          const kbd = document.createElement("kbd");
+          kbd.textContent = k;
+          dt.appendChild(kbd);
+          if (i < combo.length - 1) dt.appendChild(document.createTextNode("+"));
+        });
+        if (ci < combos.length - 1) {
+          const or = document.createElement("span");
+          or.className = "shortcuts-or";
+          or.textContent = "or";
+          dt.appendChild(or);
+        }
       });
       const dd = document.createElement("dd");
       dd.textContent = desc;
