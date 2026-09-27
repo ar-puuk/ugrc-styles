@@ -49,16 +49,12 @@ narrower scope (3 fixed Esri services, no arbitrary source editing, no accounts)
   (feature-under-cursor) doesn't answer — collision boxes would show it's being dropped for
   overlapping another label, directly. A small toggle group in the header or map corner, off by
   default.
-- [ ] **Inline schema validation, not just JSON-parse-on-blur.** Our raw-JSON fallback fields
-  only catch malformed JSON. Maputnik validates against the canonical, current MapLibre style
-  spec via `@maplibre/maplibre-gl-style-spec`'s `validate()` — **we can't just pull that package
-  in as-is**: our styles conform to the Esri/ArcGIS VectorTileServer flavor of GL style spec v8
-  (see the comment at `docs/index.html:1210` — "the spec ArcGIS's VectorTileServer style JSON
-  actually implements"), which is older and narrower than what that validator now enforces, so it
-  would false-flag valid Esri-emitted constructs. Any inline validation here has to check against
-  that v8/Esri flavor specifically — most likely by extending our own hand-maintained
-  `PROPERTY_SPECS` table (already scoped to values actually seen in these styles) with
-  type/range/enum checks, rather than adopting the upstream validator wholesale.
+- [x] **Inline schema validation, not just JSON-parse-on-blur.** Done — `validateRawPropertyValue()`/
+  `validateRawFilterValue()` check parsed raw-JSON values against `PROPERTY_SPECS` (type/enum-
+  membership only, never range min/max) plus a shape-only check for expressions/functions/filters,
+  wired into both raw-JSON textareas' existing blur handlers. Unit-tested against the real
+  `PROPERTY_SPECS` data (13 cases) plus a real-data browser pass (a genuine complex filter and a
+  `text-font` array from the Shadow theme).
 - [ ] **Style metadata quick-edit (name / center / zoom / bearing / pitch).** Maputnik has a
   small "style info" panel for the root style object's own fields. Ours never exposes
   `style.center`/`zoom`/`bearing`/`pitch` — useful mainly so a downloaded style opens centered on
