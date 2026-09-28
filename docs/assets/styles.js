@@ -175,8 +175,55 @@ export function mergeStyles(namedStyles, { glyphsFrom } = {}) {
     glyphs: namedStyles[defaultSprite].glyphs,
     sources,
     layers,
+    // Carried in the exported/downloaded file itself (style-level metadata is as inert to
+    // MapLibre/Mapbox/Esri renderers as the per-layer ugrc:service/ugrc:originalId tags above) so
+    // that re-uploading a combined style - the very thing the "Combined style" download exists for,
+    // to carry a session across devices/restarts - can still be split back into 3 files and grouped
+    // by service in the layer list, instead of degrading to an untagged flat upload. Without this,
+    // splitMergedStyle() couldn't be re-run on a re-upload: it needs each service's un-namespaced
+    // sprite/glyphs/sources and sourceKeyMap, none of which survive the merge into `style` above on
+    // their own (e.g. non-default services' glyphs is dropped from the merged style entirely).
+    metadata: { "ugrc:serviceOriginals": serviceOriginals },
   };
   return { style, serviceOriginals };
+}
+
+/** Loose structural check on a style's metadata["ugrc:serviceOriginals"] before trusting it as
+ * input to splitMergedStyle() - the file may have been hand-edited after export, or the key may
+ * have been copied in from somewhere unrelated. Doesn't validate deeply (splitMergedStyle already
+ * degrades gracefully - a service with no matching layers just exports empty), only enough to avoid
+ * crashing on garbage. */
+export function isValidServiceOriginals(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
+  const services = Object.values(obj);
+  if (services.length === 0) return false;
+  return services.every(
+    (s) => s && typeof s === "object" && typeof s.sources === "object" && typeof s.sourceKeyMap === "object"
+  );
+}
+
+/** Esri always embeds the service name in its own VectorTileServer URLs
+ * (.../services/<Service>/VectorTileServer/...) - present in every source's `url`/`tiles` and in
+ * `glyphs`, regardless of theme (checked against every committed theme's per-service files and
+ * UGRC's own live root.json responses). Used to give an uploaded style that ISN'T one of this tool's
+ * own merged exports (no ugrc:service metadata at all) a best-effort identity: a raw per-service
+ * file downloaded straight from UGRC, or one of this repo's own committed UGRC_<Service>_<theme>.json
+ * files re-uploaded on its own. Returns the matching key from ORIGINAL_SERVICE_URLS, or null if zero
+ * or more than one distinct service is referenced (nothing to report, or already a combined style). */
+export function identifyPartialService(style) {
+  const pattern = new RegExp(`/services/(${Object.keys(ORIGINAL_SERVICE_URLS).join("|")})/VectorTileServer\\b`);
+  const found = new Set();
+  const scan = (str) => {
+    if (typeof str !== "string") return;
+    const m = str.match(pattern);
+    if (m) found.add(m[1]);
+  };
+  scan(style.glyphs);
+  for (const src of Object.values(style.sources || {})) {
+    scan(src.url);
+    if (Array.isArray(src.tiles)) src.tiles.forEach(scan);
+  }
+  return found.size === 1 ? [...found][0] : null;
 }
 
 /** The inverse of mergeStyles: given a (possibly edited) merged style's `layers` array and the

@@ -1282,7 +1282,7 @@
 <script type="module">
 "use strict";
 
-import { ORIGINAL_KEY, buildOriginalStyle, buildThemeStyle, loadOptions, splitMergedStyle, prepareForRender } from "./assets/styles.js";
+import { ORIGINAL_KEY, buildOriginalStyle, buildThemeStyle, loadOptions, splitMergedStyle, prepareForRender, isValidServiceOriginals, identifyPartialService } from "./assets/styles.js";
 import { Dropdown } from "./assets/dropdown.js";
 import { ColorPickerPopover } from "./assets/colorpicker.js";
 
@@ -2768,11 +2768,12 @@ async function main() {
     return empty;
   }
 
-  /** A style with a known 3-service split (a built-in template) renders as an accordion, one
+  /** A style with a known 3-service split (a built-in template, or an uploaded re-load of this
+   * tool's own "Combined style" download - see loadUploadedFile()) renders as an accordion, one
    * service open at a time, so the working set stays manageable (LiteBase alone runs to several
    * hundred layers - see STYLE_EDITOR_PLAN.md §6). Typing a filter auto-expands every section with
    * a match instead of requiring the right one to already be open. A style with no service split
-   * (an upload) has no sections to group by and falls back to one flat list. */
+   * (an arbitrary upload) has no sections to group by and falls back to one flat list. */
   function renderLayerList() {
     const filter = layerSearchEl.value.trim().toLowerCase();
     layerListEl.innerHTML = "";
@@ -4057,15 +4058,35 @@ async function main() {
     // option should always mean the file as uploaded, not whatever it's since been edited into.
     const label = file.name.replace(/\.json$/i, "");
     uploadedBuild = { style: JSON.parse(JSON.stringify(parsed)), label };
-    // Uploads have no known 3-service origin (see STYLE_EDITOR_PLAN.md §3) - only the combined
-    // single-file download applies, regardless of whether this file was itself exported from here.
-    await loadBuild({ style: parsed, serviceOriginals: null }, label);
+    // A re-uploaded "Combined style" download (this tool's own export - see mergeStyles() in
+    // assets/styles.js) carries its 3-service split right in style-level metadata, so it doesn't
+    // degrade to a flat, unsplittable upload the way any other file does (STYLE_EDITOR_PLAN.md §3).
+    const embeddedOriginals = parsed.metadata && parsed.metadata["ugrc:serviceOriginals"];
+    const serviceOriginals = isValidServiceOriginals(embeddedOriginals) ? embeddedOriginals : null;
+    await loadBuild({ style: parsed, serviceOriginals }, label);
     current.templateKey = null;
     // No "start from" dropdown option represents "an upload" - just show the filename in the
     // picker without touching its selected-option state, since none of its options actually match.
     templatePick.label.textContent = current.label;
     refreshTemplateDdIcon(); // no templateKey - falls back to the plain file glyph
     refreshCompareOptions(); // makes "Your upload" pickable as a compare reference
+    // Not one of this tool's own combined exports (no split to recover, and no per-layer service
+    // tags either - a merged file with merely a corrupted/hand-edited serviceOriginals wouldn't hit
+    // this) - so if it looks like just one of UGRC's 3 hosted services on its own (a raw per-service
+    // file, or one of this repo's own committed UGRC_<Service>_<theme>.json files uploaded
+    // standalone), say so: loaded fine, but whatever the other 2 services contribute (hillshade,
+    // base fill, or labels) won't be there.
+    const hasServiceTags = parsed.layers.some((ly) => ly.metadata && ly.metadata["ugrc:service"]);
+    if (!serviceOriginals && !hasServiceTags) {
+      const partial = identifyPartialService(parsed);
+      if (partial) {
+        alert(
+          `Heads up: this looks like just UGRC's ${partial} layer, not a complete basemap (UGRC hosts ` +
+          `this as 1 of 3 separate services). It's loaded as-is, but VectorHillshade/LiteBase/LiteLabels ` +
+          `content the other services would normally provide won't be shown unless you load those too.`
+        );
+      }
+    }
   }
 
   function downloadCombined() {
@@ -4088,10 +4109,11 @@ async function main() {
     }
   }
 
-  /** The "3 separate files" entry only applies when what's loaded traces back to a built-in
-   * template (STYLE_EDITOR_PLAN.md §3/§8) - omitted entirely for an arbitrary upload rather than
-   * shown disabled, since a single-entry "menu" would look like a bug in its own right. Called
-   * once at startup (disabled, no template loaded yet) and again every time loadBuild() runs. */
+  /** The "3 separate files" entry only applies when what's loaded traces back to a known 3-service
+   * split - a built-in template, or an uploaded re-load of this tool's own "Combined style" download
+   * (STYLE_EDITOR_PLAN.md §3/§8) - omitted entirely for any other upload rather than shown disabled,
+   * since a single-entry "menu" would look like a bug in its own right. Called once at startup
+   * (disabled, no template loaded yet) and again every time loadBuild() runs. */
   function refreshDownloadOptions() {
     const opts = {
       combined: {

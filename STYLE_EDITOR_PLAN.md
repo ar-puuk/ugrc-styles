@@ -84,10 +84,20 @@ A layer the user adds from scratch (§7) has no `metadata["ugrc:service"]` yet �
 flow asks which of the 3 services it belongs to (defaulting to whichever layer is currently
 selected), the same choice Maputnik's own "add layer" dialog makes you pick a source for.
 
-An **uploaded** arbitrary style that isn't one of our own templates carries no service split at
-all — for that case only the combined single-file export applies (§8); "download 3 files" is only
-offered when what's loaded traces back to a built-in template, or to a prior 3-file export
-reloaded with its `metadata` intact.
+An **uploaded** arbitrary style that isn't one of our own exports carries no service split at all —
+for that case only the combined single-file export applies (§8). "Download 3 files" is offered when
+what's loaded traces back to a built-in template, or to a prior "Combined style" download reloaded:
+per-layer `metadata["ugrc:service"]` tags alone aren't enough to re-split correctly (non-default
+services' `glyphs` doesn't survive the merge on its own, and the original per-service source keys
+are only recoverable by convention), so `mergeStyles()` also stashes the whole `serviceOriginals`
+object it already builds into `style.metadata["ugrc:serviceOriginals"]` — inert to any renderer,
+round-trips through a re-upload untouched, and `loadUploadedFile()` uses it directly (after a loose
+shape check) instead of reconstructing anything. An upload with neither that key nor per-layer
+`ugrc:service` tags is checked against a lighter signal instead — Esri embeds the service name in
+every `VectorTileServer` URL (`.../services/<Service>/VectorTileServer/...`, in both `glyphs` and
+each source's `url`/`tiles`) — so a raw single-service file (straight from UGRC, or one of this
+repo's own committed `UGRC_<Service>_<theme>.json` files uploaded on its own) is identified and
+flagged as covering only 1 of the 3 services, rather than silently loading as if it were complete.
 
 ## 4. Refactor first: share code between `index.html` and the new page
 

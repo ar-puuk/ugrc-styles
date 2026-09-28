@@ -19,6 +19,18 @@ Status: `[ ]` not started · `[x]` done.
 
 ## Medium effort, distinctive
 
+- [x] **Re-uploaded "Combined style" keeps its 3-service split; standalone per-service uploads get
+  identified.** Done — `mergeStyles()` now stashes the `serviceOriginals` it already builds into
+  `style.metadata["ugrc:serviceOriginals"]` (inert to any renderer, same precedent as the existing
+  per-layer `ugrc:service`/`ugrc:originalId` tags), and `loadUploadedFile()` uses it (after
+  `isValidServiceOriginals()`) instead of always falling back to a flat, unsplittable upload. Closes
+  the gap where the "Combined style" download - meant to carry a session across devices/restarts,
+  per UGRC's own ask to reuse this tool - would silently lose per-service grouping and the "3
+  separate files" download on reload. Separately, `identifyPartialService()` matches the service
+  name Esri embeds in every `VectorTileServer` URL to flag an upload that's just 1 of the 3 hosted
+  services on its own (a raw file straight from UGRC, or one of this repo's own committed
+  `UGRC_<Service>_<theme>.json` files) instead of silently loading it as if it were a complete
+  basemap.
 - [ ] **"Copy comparison image" button in compare mode.** Composite both map canvases
   (`canvas.toDataURL`) into one PNG when the swipe compare is active — turns the before/after
   screenshots currently taken by hand into a one-click export.
