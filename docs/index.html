@@ -1603,6 +1603,29 @@ const DEFAULT_PROPERTY_VALUES = {
   "text-font": ["Open Sans Regular"],
 };
 
+/** Hardcoded rather than read from --primary: a MapLibre paint value needs a resolved color, not
+ * a CSS custom property, and --primary is the same 39 87% 62% in both light and dark mode anyway. */
+const FLASH_COLOR = "hsl(39, 87%, 62%)";
+
+/** The peak value flashLayer() (below, near selectLayer) briefly animates each property TOWARD
+ * and back down from - a smooth rise-and-fall (never a hard on/off cut, never repeated), so it
+ * reads as a single gentle glow regardless of how much screen area the layer covers, rather than
+ * a strobe - important since a county-wide fill covers a large fraction of the screen, and rapid
+ * high-contrast flashing over a large area is a real photosensitive-seizure trigger. A flat
+ * highlight rather than scaling the layer's real value, since that value can be an arbitrary zoom/
+ * data expression this code can't safely do arithmetic on. Only the types this editor ever deals
+ * with need an entry - no layer in these services is ever raster/background (see
+ * LAYER_TYPE_PROPERTIES above), so flashLayer() is just a no-op for anything not listed here. */
+const FLASH_PAINT = {
+  fill: { "fill-color": FLASH_COLOR, "fill-opacity": 0.5 },
+  line: { "line-color": FLASH_COLOR, "line-width": 5, "line-opacity": 1 },
+  circle: { "circle-color": FLASH_COLOR, "circle-radius": 10, "circle-opacity": 1 },
+  symbol: {
+    "icon-color": FLASH_COLOR, "icon-halo-color": FLASH_COLOR, "icon-halo-width": 2,
+    "text-color": FLASH_COLOR, "text-halo-color": FLASH_COLOR, "text-halo-width": 2,
+  },
+};
+
 /** Parses a MapLibre color VALUE (not a full expression) into {hex, alpha}, or null if it isn't a
  * plain hex/rgb(a) string this editor knows how to round-trip (a named color like "steelblue", an
  * hsl() string, or a data-driven expression array all return null - those fall back to a plain
@@ -1629,6 +1652,23 @@ function parseColor(value) {
 function formatColor(hex, alpha) {
   const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
   return alpha >= 1 ? hex : `rgba(${r}, ${g}, ${b}, ${Math.round(alpha * 100) / 100})`;
+}
+
+/** Blends two color VALUES for flashLayer()'s animation (see below, near selectLayer) - `t=0` is
+ * `from`, `t=1` is `to`. Either side can be a data-driven expression parseColor() can't handle
+ * (it only understands plain hex/rgb(a)); rather than guess at that, this just cuts over to `to`
+ * partway through instead of lerping, since a mid-animation hard cut on an already-unusual color
+ * value is a minor cosmetic gap, not the seizure-risk hard cut this whole scheme exists to avoid
+ * (that one only ever happens once, not repeatedly, and flashLayer always still resolves back to
+ * the real original value once the animation ends). */
+function mixColor(from, to, t) {
+  const a = parseColor(from), b = parseColor(to);
+  if (!a || !b) return t < 0.5 ? from : to;
+  const lerp = (x, y) => x + (y - x) * t;
+  const toChannel = (hex, i) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
+  const toHex = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
+  const hex = `#${[0, 1, 2].map((i) => toHex(lerp(toChannel(a.hex, i), toChannel(b.hex, i)))).join("")}`;
+  return formatColor(hex, lerp(a.alpha, b.alpha));
 }
 
 function slugify(label) {
@@ -2354,7 +2394,8 @@ async function main() {
     if (!inspectMode) return;
     inspectTooltipEl.hidden = true;
   }
-  function renderInspectPanel(features, point) {
+  function renderInspectPanel(features, point, sourceMap) {
+    cancelFlash(); // the row it belonged to is about to be torn down below, without a mouseleave
     const rows = dedupeFeaturesByLayer(features);
     inspectPanelEl.innerHTML = "";
     if (rows.length === 0) {
@@ -2378,6 +2419,10 @@ async function main() {
       meta.className = "inspect-panel-row-meta";
       meta.textContent = f.sourceLayer ? `${f.layer.type} · ${f.sourceLayer}` : f.layer.type;
       row.append(id, meta);
+      // Pulses the layer on whichever map this row actually came from, on hover, regardless of
+      // whether it's jumpable - a reference-only row still benefits from seeing where it renders.
+      row.addEventListener("mouseenter", () => flashLayer(sourceMap, f.layer.id));
+      row.addEventListener("mouseleave", cancelFlash);
       if (inCurrentStyle) {
         row.addEventListener("click", () => {
           layerSearchEl.value = ""; // clear any filter that would otherwise hide the jumped-to row
@@ -2395,7 +2440,7 @@ async function main() {
   function onInspectClick(e) {
     if (!inspectMode) return;
     inspectTooltipEl.hidden = true;
-    renderInspectPanel(e.target.queryRenderedFeatures(e.point), e.point);
+    renderInspectPanel(e.target.queryRenderedFeatures(e.point), e.point, e.target);
   }
   /** Binds the inspector's hover/click handlers to a map - called once for `map` (below) and once
    * more for compareMap the moment it's created (setCompareTarget), since it doesn't exist until
@@ -2413,6 +2458,7 @@ async function main() {
     if (compareMap) compareMap.getCanvas().style.cursor = active ? "crosshair" : "";
     inspectTooltipEl.hidden = true;
     inspectPanelEl.hidden = true;
+    cancelFlash();
   }
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
@@ -3045,6 +3091,86 @@ async function main() {
     saveDraftNow(current);
   }
 
+  /** The in-flight flashLayer() animation, if any - so a fast hover across inspect-panel rows, or
+   * selecting a different layer mid-pulse, cancels the previous flash's revert instead of two
+   * animations fighting over the same paint properties. */
+  let activeFlash = null; // { map, id, props, original, raf }
+
+  /** Reverts an in-progress or just-finished flash to each property's true original value, but
+   * only where the live value still equals what the flash last set it to - if a property-panel
+   * edit changed a property while the flash was running, this leaves that edit alone rather than
+   * stomping it back to the pre-flash value. */
+  function restoreFlash(flash) {
+    const { map: m, id, props, original, last } = flash;
+    if (!m.getLayer(id)) return;
+    for (const prop of Object.keys(props)) {
+      let live;
+      try { live = m.getPaintProperty(id, prop); } catch { continue; }
+      if (JSON.stringify(live) === JSON.stringify(last[prop])) m.setPaintProperty(id, prop, original[prop]);
+    }
+  }
+
+  function cancelFlash() {
+    if (!activeFlash) return;
+    cancelAnimationFrame(activeFlash.raf);
+    restoreFlash(activeFlash);
+    activeFlash = null;
+  }
+
+  /** Briefly, smoothly animates a layer's own paint properties (FLASH_PAINT above) up to a
+   * highlight peak and back down to their real value, so it's obvious where that layer renders on
+   * the map - used both when hovering a row in the inspect panel and whenever a layer becomes the
+   * one being edited. This is one continuous rise-and-fall (sine-eased, ~1s), never a hard on/off
+   * cut and never repeated - a rapid, high-contrast, large-area flash (this map can easily be
+   * mostly covered by one county-wide fill layer) is a real photosensitive-seizure trigger, and a
+   * single smooth pulse carries none of that risk regardless of how much screen area lights up.
+   * Animates the real layer in place via map.setPaintProperty rather than cloning its geometry
+   * into an overlay layer - that works for every paintable type instead of just the one clicked
+   * feature, and it never touches `current.style` itself, so it can't leak into history/export.
+   * `m` is whichever map actually renders `id` - `map` for a selected/edited layer, or the inspect
+   * panel's source map (could be compareMap) for a hovered row. */
+  function flashLayer(m, id) {
+    const ly = m && m.getLayer(id);
+    if (!ly) return;
+    cancelFlash();
+    const props = FLASH_PAINT[ly.type];
+    if (!props) return; // raster/background/etc. - nothing this editor flashes
+    const original = {};
+    for (const prop of Object.keys(props)) {
+      const live = m.getPaintProperty(id, prop);
+      // The animation itself needs a numeric/color starting point to ease from - fall back to the
+      // property's spec default when the live value is unset or is an expression this code can't
+      // interpolate; `original[prop]` (used to restore once the animation ends) is always the
+      // exact true value regardless, so this fallback only ever affects the pulse's shape, never
+      // the value the layer settles back to.
+      original[prop] = live;
+    }
+    const DURATION = 1000; // ms - one slow breath, nowhere near the ~3-per-second flash threshold
+    const startedAt = performance.now();
+    const flash = { map: m, id, props, original, last: {}, raf: null };
+    const tick = (now) => {
+      const t = Math.min(1, (now - startedAt) / DURATION);
+      const envelope = Math.sin(Math.PI * t); // 0 -> 1 -> 0, smoothly, both ends resting at "no change"
+      for (const prop of Object.keys(props)) {
+        const peak = props[prop];
+        const base = typeof peak === "number"
+          ? (typeof original[prop] === "number" ? original[prop] : (DEFAULT_PROPERTY_VALUES[prop] ?? peak))
+          : (typeof original[prop] === "string" ? original[prop] : peak);
+        const value = typeof peak === "number" ? base + (peak - base) * envelope : mixColor(base, peak, envelope);
+        flash.last[prop] = value;
+        try { m.setPaintProperty(id, prop, value); } catch { /* layer no longer exists (e.g. a style-replacing edit mid-pulse) */ }
+      }
+      if (t < 1) {
+        flash.raf = requestAnimationFrame(tick);
+      } else {
+        restoreFlash(flash);
+        if (activeFlash === flash) activeFlash = null;
+      }
+    };
+    flash.raf = requestAnimationFrame(tick);
+    activeFlash = flash;
+  }
+
   function selectLayer(id) {
     selectedLayerId = id;
     const ly = current && current.style.layers.find((l) => l.id === id);
@@ -3060,6 +3186,7 @@ async function main() {
     }
     renderLayerList();
     renderPropertyPanel();
+    flashLayer(map, id); // pulse the map so it's obvious which layer just became the one being edited
   }
 
   /** Layers that currently render this one's exact `kind`/`prop` value, restricted to the same
